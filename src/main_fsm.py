@@ -9,6 +9,7 @@
 import asyncio
 import time
 
+from mavsdk.offboard import PositionNedYaw
 from interface import PX4Interface
 from config import CRUISE_ALTITUDE_M, FSM_LOOP_HZ, MAX_STACK_DEPTH
 from logger_manager import get_logger
@@ -16,6 +17,8 @@ from states.base_state import BaseState
 from states.hover import HoverState
 from states.transit import TransitState
 from states.land_in_place import LandInPlaceState
+from states.land import PrecisionLandState
+from states.search import SearchState
 
 
 class MissionFSM:
@@ -36,14 +39,16 @@ class MissionFSM:
         因此任务栈从 HoverState 开始（稳定悬停后执行后续任务）。
 
         栈顶（list[-1]）先执行，完成弹出后下一层接管。
-        所以构建顺序与执行顺序相反：
-            LandInPlace（栈底，最后执行）
-            Transit
-            Hover（栈顶，最先执行）
+        所以构建顺序与执行顺序相反
         """
         self._stack = [
-            LandInPlaceState(timeout_s=60),                                # 栈底 — 最后
-            TransitState(north=500.0, east=0.0, up=5.0, speed=5.0, timeout_s=30),
+            PrecisionLandState(timeout_s=30),
+            SearchState(timeout_s=60),                             
+            TransitState(
+                target=PositionNedYaw(
+                    30.0, 0.0, -CRUISE_ALTITUDE_M, 0.0   # 场地坐标 → field_to_ned 旋转后发送
+                ), speed=5.0, timeout_s=30),
+
             ]
 
     # ------------------------------------------------------------------

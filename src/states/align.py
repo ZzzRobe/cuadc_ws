@@ -9,6 +9,8 @@ ned_offset 使用场地 NED 坐标系（与 field_to_ned 的输入坐标系一�
 
 import asyncio
 
+from mavsdk.offboard import PositionNedYaw
+
 from .base_state import BaseState, ExecutionResult
 from config import (
     DROP_ALIGN_ALTITUDE_M, DROP_ZONE_DISTANCE_M,
@@ -46,11 +48,12 @@ class AlignState(BaseState):
             return
 
         # 向目标圆柱体下降
-        sp = interface.field_to_ned(
+        sp = interface.field_to_ned(PositionNedYaw(
             DROP_ZONE_DISTANCE_M + self._target.ned_offset[0],
             self._target.ned_offset[1],
-            DROP_ALIGN_ALTITUDE_M,
-        )
+            -DROP_ALIGN_ALTITUDE_M,
+            0.0,
+        ))
         interface.update_setpoint(sp)
         self.phase = "descend"
         self._search_start = self.elapsed()
@@ -105,11 +108,12 @@ class AlignState(BaseState):
                 return ExecutionResult(done=True)
 
             # 保持位置，向最后已知位置漂移
-            sp = interface.field_to_ned(
+            sp = interface.field_to_ned(PositionNedYaw(
                 DROP_ZONE_DISTANCE_M + self._target.ned_offset[0],
                 self._target.ned_offset[1],
-                alt,
-            )
+                -alt,
+                0.0,
+            ))
             interface.update_setpoint(sp)
             return ExecutionResult()
 
@@ -127,11 +131,12 @@ class AlignState(BaseState):
             return ExecutionResult(done=True)
 
         # P 控制位置调整
-        sp = interface.field_to_ned(
+        sp = interface.field_to_ned(PositionNedYaw(
             DROP_ZONE_DISTANCE_M + offset_x * VISUAL_SERVO_KP,
             offset_y * VISUAL_SERVO_KP,
-            alt,
-        )
+            -alt,
+            0.0,
+        ))
         interface.update_setpoint(sp)
         return ExecutionResult()
 

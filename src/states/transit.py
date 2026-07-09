@@ -21,36 +21,38 @@
 import math
 import time
 
+from mavsdk.offboard import PositionNedYaw
+
 from .base_state import BaseState, ExecutionResult
 from config import FSM_LOOP_HZ
 
 
 class TransitState(BaseState):
     """
-    以受控速度飞往目标场地 NED 坐标。
+    以受控速度飞往目标场地坐标。
 
-    参数 north, east, up 均在"场地 NED"坐标系中：
-      - north = 沿场地前方方向（米）
-      - east  = 沿场地右方方向（米）
-      - up    = 飞行高度（米，向上为正）
+    参数 target 是 PositionNedYaw（场地坐标系）：
+      - north_m = 沿场地前方方向（米）
+      - east_m  = 沿场地右方方向（米）
+      - down_m  = 飞行高度（米，向下为正），-5.0 = 5米高
+      - yaw_deg  = 场地坐标系中的目标航向（度，0°=场地前方）
 
-    工作方式：
-      进入时设置 PX4 参数 MPC_XY_VEL_MAX 为 speed，
-      发送目标 setpoint，PX4 内部 Position Controller
-      自动控制全程飞行。每周期检查距离判据。
+    enter() 时通过 interface.field_to_ned() 将场地坐标旋转为
+    真北 NED 发送给 PX4。PX4 内部 Position Controller 自动控制
+    全程飞行。每周期检查距离判据。
     """
 
     # 航点到达距离阈值（米）
     ARRIVE_DISTANCE_M = 1.0
 
-    def __init__(self, north: float, east: float, up: float,
+    def __init__(self, target: PositionNedYaw,
                  speed: float = 5.0, timeout_s: float = 60):
         super().__init__("Transit", timeout_s)
-        self.target_north, self.target_east, self.target_up = north, east, up
+        self.target = target   # PositionNedYaw（场地坐标系）
         self.speed = speed
 
         # 状态（在 enter() 中初始化）
-        self._target_ned = None
+        self._target_ned = None   # 真北 NED（经 field_to_ned 转换后）
         self._total_dist = None
         self._original_vel_max = None  # 原始 MPC_XY_VEL_MAX，退出时恢复
         self._debug_counter = 0
@@ -63,8 +65,7 @@ class TransitState(BaseState):
     async def enter(self, interface):
         await super().enter(interface)
 
-        self._target_ned = interface.field_to_ned(
-            self.target_north, self.target_east, self.target_up)
+        self._target_ned = interface.field_to_ned(self.target)
 
         pos = await interface.get_position_ned()
         self._total_dist = math.hypot(
@@ -76,12 +77,14 @@ class TransitState(BaseState):
         self._original_vel_max = await interface.start_position_flight(
             self._target_ned, self.speed)
 
-        print(f"[巡航] 航点 setpoint: "
+        print(f"[巡航] 航点 setpoint (真北): "
               f"N({self._target_ned.north_m:.1f}) "
               f"E({self._target_ned.east_m:.1f}) "
-              f"D({self._target_ned.down_m:.1f})", flush=True)
-        print(f"[巡航] -> 场地 NED({self.target_north:.1f}, "
-              f"{self.target_east:.1f}, {self.target_up:.1f}) "
+              f"D({self._target_ned.down_m:.1f}) "
+              f"Yaw({self._target_ned.yaw_deg:.0f}°)", flush=True)
+        print(f"[巡航] -> 场地坐标 N({self.target.north_m:.1f}, "
+              f"{self.target.east_m:.1f}), 高度 {-self.target.down_m:.1f}m, "
+              f"航向 {self.target.yaw_deg:.0f}° "
               f"@ {self.speed:.1f} m/s, 总距 {self._total_dist:.1f} m",
               flush=True)
 
@@ -101,7 +104,7 @@ class TransitState(BaseState):
         alt = await interface._read_altitude_direct()
 
         # ---- 到达判据 ----
-        if drone_dist < self.ARRIVE_DISTANCE_M and abs(alt - self.target_up) < 0.5:
+        if drone_dist < self.ARRIVE_DISTANCE_M and abs(alt + self.target.down_m) < 0.5:
             print(f"[巡航] 到达航点 (距离 {drone_dist:.1f}m, 高度 {alt:.1f}m)",
                   flush=True)
             self.is_completed = True

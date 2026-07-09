@@ -8,6 +8,8 @@
 航点坐标使用场地 NED 坐标系（north=场地前方, east=场地右方, up=高度）。
 """
 
+from mavsdk.offboard import PositionNedYaw
+
 from .base_state import BaseState, ExecutionResult
 from config import RECON_ZONE_DISTANCE_M, RECON_ALTITUDE_M, RECON_SCAN_STEP_M
 
@@ -41,7 +43,7 @@ class ReconState(BaseState):
 
         # 发送第一个航点
         wp = self._waypoints[0]
-        sp = interface.field_to_ned(*wp)
+        sp = interface.field_to_ned(PositionNedYaw(wp[0], wp[1], -wp[2], 0.0))
         interface.update_setpoint(sp)
 
         print(f"[侦察] 开始蛇形扫描，"
@@ -69,7 +71,7 @@ class ReconState(BaseState):
             self._current_wp += 1
             if self._current_wp < len(self._waypoints):
                 nx, ny, nz = self._waypoints[self._current_wp]
-                sp = interface.field_to_ned(nx, ny, nz)
+                sp = interface.field_to_ned(PositionNedYaw(nx, ny, -nz, 0.0))
                 interface.update_setpoint(sp)
                 print(f"[侦察] 航点 {self._current_wp}/{len(self._waypoints)}")
 

@@ -35,14 +35,15 @@ FIELD_YAW_DEG = 0.0
 # 飞行参数
 # ---------------------------------------------------------------------------
 CRUISE_ALTITUDE_M = 5.0          # 起飞后的安全巡航高度(uncertain)
-DROP_ZONE_DISTANCE_M = 30.0      # 起飞点到投掷区的距离
+DROP_ZONE_DISTANCE_M = 30.0      # 起飞点到投掷区前缘的距离
+DROP_ZONE_HALF_N_M = 2.5        # 投掷区 N 方向半长（5m/2）
 RECON_ZONE_DISTANCE_M = 55.0     # 起飞点到侦察区的距离
 DROP_ALIGN_ALTITUDE_M = 2.0      # 圆柱体上方精细对准高度(uncertain)
 RECON_ALTITUDE_M = 3.0           # 侦察扫描高度(uncertain)
 LAND_START_ALTITUDE_M = 5.0      # 开始降落序列时的高度
 LAND_SAFE_ALTITUDE_M = 2.0       # 低于此高度时使用慢速下降(unused)
 TRANSIT_SPEED_MPS = 5.0          # 区域间巡航速度(uncertain)
-SEARCH_SPEED_MPS = 3.0              # 搜索矩形航线飞行速度(uncertain)
+SEARCH_SPEED_MPS = 1.0              # 搜索矩形航线飞行速度(uncertain)
 ARRIVAL_REL_THRESHOLD = 0.05        # 航点到达判据：剩余距离 < 航段长度×此值即认为到达
 BOTTLE_DIAMETER_TOLERANCE_CM = 2.0  # 瓶子直径匹配容差 (cm)，用于搜索状态识别目标
 
@@ -51,7 +52,7 @@ BOTTLE_DIAMETER_TOLERANCE_CM = 2.0  # 瓶子直径匹配容差 (cm)，用于搜�
 #   E方向 (长边, 沿飞行右方): 6m → half = 3.0m
 SEARCH_RECT_HALF_N_M = 1.5          # 搜索矩形 N 半长（短边/2，沿飞行前方）
 SEARCH_RECT_HALF_E_M = 3.0          # 搜索矩形 E 半长（长边/2，沿飞行右方）
-SEARCH_RECT_CENTER_N_M = DROP_ZONE_DISTANCE_M  # 搜索矩形中心 N 坐标（与投放区同心）
+SEARCH_RECT_CENTER_N_M = DROP_ZONE_DISTANCE_M + DROP_ZONE_HALF_N_M  # 搜索矩形与投放区同心
 SEARCH_RECT_CENTER_E_M = 0.0                    # 搜索矩形中心 E 坐标
 
 # ---------------------------------------------------------------------------

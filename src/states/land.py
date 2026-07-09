@@ -1,5 +1,5 @@
 """
-降落 —— 飞回初始点上空，触发 PX4 自动着陆，等待完成。
+降落 —— 触发 PX4 RTL 模式，飞控自主返航着陆。
 """
 
 from .base_state import BaseState, ExecutionResult
@@ -7,22 +7,20 @@ from logger_manager import get_logger
 
 
 class PrecisionLandState(BaseState):
-    """降落：飞回场地 NED 原点，触发 land，等待 PX4 着陆并自动 disarm。"""
+    """降落：触发 RTL，PX4 自主爬升→返航→降落→自动 disarm。"""
 
     def __init__(self, timeout_s: float = 60):
         super().__init__("Land", timeout_s)
 
     async def enter(self, interface):
         await super().enter(interface)
-        # 先回到原点上方
-        alt = await interface.get_altitude()
-        sp = interface.field_to_ned(0.0, 0.0, alt)
-        interface.update_setpoint(sp)
-        print(f"[降落] 返回原点上方 {alt:.1f} 米，触发着陆")
-        get_logger().log_message(
-            "land", f"返回原点上方 {alt:.1f} 米，触发着陆")
-        # 触发 PX4 自动降落（切到 Land 模式，着陆后自动 disarm）
-        await interface.land()
+        # ---- RTL 前设置返航参数 ----
+        await interface.drone.param.set_param_float("MPC_XY_CRUISE", 5.0)
+        await interface.drone.param.set_param_float("MPC_XY_VEL_MAX", 12.0)
+        await interface.drone.param.set_param_float("RTL_RETURN_ALT", 10.0)
+        print("[降落] RTL: 返航速度 5 m/s，返航高度 10 m")
+        get_logger().log_message("land", "RTL: 返航速度 5 m/s，返航高度 10 m")
+        await interface.drone.action.return_to_launch()
 
     async def execute(self, interface):
         if self.is_timed_out():
@@ -30,7 +28,7 @@ class PrecisionLandState(BaseState):
             get_logger().log_message("land", "降落超时", "timeout")
             return ExecutionResult(done=True)
 
-        # 检测着陆完成：PX4 着陆后自动 disarm，armed 变为 False
+        # 检测着陆完成：PX4 RTL 着陆后自动 disarm，armed 变为 False
         async for armed in interface.drone.telemetry.armed():
             if not armed:
                 self.is_completed = True

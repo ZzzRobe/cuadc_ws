@@ -29,6 +29,8 @@ import math
 from dataclasses import dataclass
 from typing import Tuple, TYPE_CHECKING
 
+from mavsdk.offboard import PositionNedYaw
+
 from .base_state import BaseState, ExecutionResult
 from .align import AlignState
 from config import (CRUISE_ALTITUDE_M, ARRIVAL_THRESHOLD_M,
@@ -96,11 +98,17 @@ class SearchState(BaseState):
         self._original_vel_max = None  # 原始 MPC_XY_VEL_MAX，退出时恢复
 
         # 视觉流水线: YOLO → Canny边缘 → HoughCircles → 直径
-        self.pipeline = VisionPipeline(
-            model_path="models/yolov11n_800_best_FP16.engine",
-            yolo_conf=0.5,
-            circle_conf_threshold=0.3,
-        )
+        # 模型加载失败（无 GPU / TensorRT 不匹配）时降级为无视觉模式，仅巡逻飞行
+        self.pipeline = None
+        try:
+            self.pipeline = VisionPipeline(
+                model_path=None,  # 使用 YOLODetector 默认路径 (src/vision/models/)
+                yolo_conf=0.5,
+                circle_conf_threshold=0.3,
+            )
+        except Exception as e:
+            print(f"[搜索] VisionPipeline 初始化失败: {e}", flush=True)
+            print("[搜索] 将以无视觉模式运行（仅巡逻飞行）", flush=True)
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -116,16 +124,27 @@ class SearchState(BaseState):
         hn = SEARCH_RECT_HALF_N_M
         he = SEARCH_RECT_HALF_E_M
         self._rect_waypoints = [
-            (cn + hn, ce - he),  # 前左
-            (cn + hn, ce + he),  # 前右
-            (cn - hn, ce + he),  # 后右
-            (cn - hn, ce - he),  # 后左
+            PositionNedYaw(cn - hn, ce + he, -CRUISE_ALTITUDE_M, 0.0),  # 后右（起点）
+            PositionNedYaw(cn + hn, ce + he, -CRUISE_ALTITUDE_M, 0.0),  # 前右
+            PositionNedYaw(cn + hn, ce - he, -CRUISE_ALTITUDE_M, 0.0),  # 前左
+            PositionNedYaw(cn - hn, ce - he, -CRUISE_ALTITUDE_M, 0.0),  # 后左
         ]
+        # 计算每个航点的目标航向：从上一个航点指向当前航点的方位角
+        for i in range(len(self._rect_waypoints)):
+            prev = self._rect_waypoints[(i - 1) % len(self._rect_waypoints)]
+            dn = self._rect_waypoints[i].north_m - prev.north_m
+            de = self._rect_waypoints[i].east_m - prev.east_m
+            yaw = math.degrees(math.atan2(de, dn))
+            self._rect_waypoints[i] = PositionNedYaw(
+                self._rect_waypoints[i].north_m,
+                self._rect_waypoints[i].east_m,
+                self._rect_waypoints[i].down_m,
+                yaw,
+            )
         self._wp_index = 0
 
         # ---- 启动 PX4 原生位置飞行（设置限速 + 发送第一个航点 setpoint） ----
-        north_m, east_m = self._rect_waypoints[0]
-        target = interface.field_to_ned(north_m, east_m, CRUISE_ALTITUDE_M)
+        target = interface.field_to_ned(self._rect_waypoints[0])
         self._original_vel_max = await interface.start_position_flight(
             target, SEARCH_SPEED_MPS)
 
@@ -144,37 +163,40 @@ class SearchState(BaseState):
         # PX4 Position Controller 以 200Hz+ 自主飞行。
         arrived = await self._fly_to_target(interface, self._wp_index)
 
-        # ---- 执行视觉检测 ----
-        alt = await interface.get_altitude()
-        frame = await capture_frame_async()
+        # ---- 执行视觉检测（无 pipeline 或异常时静默跳过） ----
+        if self.pipeline is not None:
+            try:
+                alt = await interface.get_altitude()
+                frame = await capture_frame_async()
 
-        # VisionPipeline: YOLO → Canny边缘 → HoughCircles → 针孔模型算直径
-        results = self.pipeline.process_frame(frame, alt_rel_m=alt)
+                # VisionPipeline: YOLO → Canny边缘 → HoughCircles → 针孔模型算直径
+                results = self.pipeline.process_frame(frame, alt_rel_m=alt)
 
-        for r in results:
-            if not r["edge_success"]:
-                continue                # 圆检测失败，跳过
+                for r in results:
+                    if not r["edge_success"]:
+                        continue                # 圆检测失败，跳过
 
-            diameter_cm = r["diameter_m"] * 100   # 真实直径 (cm)
-            # 匹配 15cm 瓶 (goal[0])
-            if abs(diameter_cm - 15) <= EPSILON_DIAMETER_CM and self.goal[0] == 0:
-                self.goal[0] = 1
-                self._save_detection(interface, bottle=1, result=r, alt_m=alt)
-                # 栈式抢占：挂起搜索 → 压入对准 → 对准完成后 resume 继续搜索
-                return ExecutionResult(interrupt=AlignState(bottle_index=1))
-            # 匹配 20cm 瓶 (goal[1])
-            elif abs(diameter_cm - 20) <= EPSILON_DIAMETER_CM and self.goal[1] == 0:
-                self.goal[1] = 1
-                self._save_detection(interface, bottle=2, result=r, alt_m=alt)
-                return ExecutionResult(interrupt=AlignState(bottle_index=2))
+                    diameter_cm = r["diameter_m"] * 100   # 真实直径 (cm)
+                    # 匹配 15cm 瓶 (goal[0])
+                    if abs(diameter_cm - 15) <= EPSILON_DIAMETER_CM and self.goal[0] == 0:
+                        self.goal[0] = 1
+                        self._save_detection(interface, bottle=1, result=r, alt_m=alt)
+                        # 栈式抢占：挂起搜索 → 压入对准 → 对准完成后 resume 继续搜索
+                        return ExecutionResult(interrupt=AlignState(bottle_index=1))
+                    # 匹配 20cm 瓶 (goal[1])
+                    elif abs(diameter_cm - 20) <= EPSILON_DIAMETER_CM and self.goal[1] == 0:
+                        self.goal[1] = 1
+                        self._save_detection(interface, bottle=2, result=r, alt_m=alt)
+                        return ExecutionResult(interrupt=AlignState(bottle_index=2))
+            except Exception as e:
+                print(f"[搜索] 视觉检测异常: {e}", flush=True)
 
         if not arrived:
             return ExecutionResult()     # 还在路上，下一帧继续飞 + 检测
 
         # ---- 到达当前航点 → 推进到下一个，绕圈循环 ----
         self._wp_index = (self._wp_index + 1) % len(self._rect_waypoints)
-        north_m, east_m = self._rect_waypoints[self._wp_index]
-        target = interface.field_to_ned(north_m, east_m, CRUISE_ALTITUDE_M)
+        target = interface.field_to_ned(self._rect_waypoints[self._wp_index])
         interface.update_setpoint(target)
         return ExecutionResult()
 
@@ -201,8 +223,7 @@ class SearchState(BaseState):
 
         返回 True 表示已到达（距离 < ARRIVAL_THRESHOLD_M）。
         """
-        north_m, east_m = self._rect_waypoints[wp_idx]
-        target = interface.field_to_ned(north_m, east_m, CRUISE_ALTITUDE_M)
+        target = interface.field_to_ned(self._rect_waypoints[wp_idx])
 
         # 刷新心跳缓存 —— 确保 resume 后心跳也发送正确目标
         interface.update_setpoint(target)

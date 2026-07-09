@@ -468,36 +468,42 @@ class PX4Interface:
     # 场地 NED 到真北 NED 的转换（旋转矩阵）
     # ------------------------------------------------------------------
 
-    def field_to_ned(self, north_m: float, east_m: float,
-                     up_m: float) -> PositionNedYaw:
+    def field_to_ned(self, field_pos: PositionNedYaw) -> PositionNedYaw:
         """
-        将场地对齐的 NED 坐标转换为真北 NED 坐标 + 航向。
+        将场地坐标系的 PositionNedYaw 转换为真北 NED 坐标系。
 
         代码中所有任务坐标均在"场地 NED"坐标系中定义：
           - 原点 = HOME 点
           - N 轴 = 场地前方方向
           - E 轴 = 场地右方方向
-          - 高度用 up（-D，向上为正）表示
 
-        此方法通过二维旋转矩阵将场地 NED 映射为真北 NED：
+        此方法对位置和航向同时应用二维旋转矩阵：
 
-            [true_N]   [cos(θ)  -sin(θ)] [north_m]
-            [true_E] = [sin(θ)   cos(θ)] [east_m]
+            [true_N]   [cos(θ)  -sin(θ)] [field_pos.north_m]
+            [true_E] = [sin(θ)   cos(θ)] [field_pos.east_m]
+
+            true_yaw  = field_pos.yaw_deg + θ
 
         其中 θ = FIELD_YAW_DEG（场地前方方向的真北方位角）。
 
+        注意：down_m 直接透传（垂直轴两个坐标系共用），不做变换。
+
         参数:
-            north_m: 场地 NED 北向分量（沿场地前方，米）
-            east_m:  场地 NED 东向分量（沿场地右方，米）
-            up_m:    飞行高度（米，向上为正）
+            field_pos: 场地坐标系中的目标位姿
+                       - north_m, east_m: 场地 NED 水平坐标（米）
+                       - down_m:          真北 NED 垂直坐标（米，向下为正）
+                       - yaw_deg:         场地坐标系中的目标航向（度，
+                                          0°=场地前方）
 
         返回:
-            PositionNedYaw，包含：
-              - north_m, east_m: 真北 NED 水平坐标（米）
-              - down_m: 真北 NED 垂直坐标（-up_m）
-              - yaw: 设为 FIELD_YAW_DEG，使机头朝向场地前方
+            PositionNedYaw，真北 NED 坐标系，可直接发送给 PX4
         """
         theta = math.radians(self.FIELD_YAW_DEG)
-        true_north = north_m * math.cos(theta) - east_m * math.sin(theta)
-        true_east = north_m * math.sin(theta) + east_m * math.cos(theta)
-        return PositionNedYaw(true_north, true_east, -up_m, self.FIELD_YAW_DEG)
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        true_north = field_pos.north_m * cos_t - field_pos.east_m * sin_t
+        true_east = field_pos.north_m * sin_t + field_pos.east_m * cos_t
+        true_yaw = field_pos.yaw_deg + self.FIELD_YAW_DEG
+
+        return PositionNedYaw(true_north, true_east, field_pos.down_m, true_yaw)

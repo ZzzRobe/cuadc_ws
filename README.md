@@ -180,19 +180,12 @@ arm → [PX4内建起飞至7m] → Hover(1s) → Transit(30m) → Hover(1s)
 4. **状态超时保护** — 每个状态有独立超时时间，超时跳过或降级
 5. **异常兜底** — 未捕获异常自动触发着陆
 
-## 注意事项
-
-- **VMware 虚拟机**：Gazebo Harmonic 默认 Ogre2 渲染不支持，需设置 `PX4_GZ_SIM_RENDER_ENGINE=ogre`
-- **端口差异**：Gazebo SITL 的 offboard 端口为 14580（非 14540），程序已适配，连接地址使用 `0.0.0.0:14540`
-- **摄像头**：Gazebo 仿真中相机需额外配置，当前视觉状态在仿真中会因摄像头未初始化而超时跳过
-- **Python 缓冲**：调试时使用 `PYTHONUNBUFFERED=1` 确保实时输出
-
 ## TODO:
 
-[x] 在`main_fsm.py`中的`_handle_unhealthy`处理：怎么处理？合理性？
-[x] 坐标系转换问题 — 已改为手动配置 FIELD_YAW_DEG + 旋转矩阵方案
-[] 心跳问题
-
+- [x] 在`main_fsm.py`中的`_handle_unhealthy`处理：怎么处理？合理性？
+- [x] 坐标系转换问题 — 已改为手动配置 FIELD_YAW_DEG + 旋转矩阵方案
+- [x] 心跳问题
+- [] search中处理图像和后续的处理图像时需要考虑上下文
 ## 许可证
 
 CUADC 2026 竞赛项目 — 仅供团队内部使用
