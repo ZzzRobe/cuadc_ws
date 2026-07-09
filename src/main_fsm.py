@@ -46,7 +46,7 @@ class MissionFSM:
             SearchState(timeout_s=60),                             
             TransitState(
                 target=PositionNedYaw(
-                    30.0, 0.0, -CRUISE_ALTITUDE_M, 0.0   # 场地坐标 → field_to_ned 旋转后发送
+                    31.0, 0.0, -CRUISE_ALTITUDE_M, 0.0   # 场地坐标 → field_to_ned 旋转后发送
                 ), speed=5.0, timeout_s=30),
 
             ]
@@ -86,7 +86,8 @@ class MissionFSM:
                 get_logger().log_state_transition(prev_name, state.name)
 
                 # 进入前全局健康检查
-                if not await self.interface.global_guard_check():
+                if not await self.interface.global_guard_check(
+                        allow_disarmed=state.allow_disarmed):
                     await self._handle_unhealthy(
                         f"进入 {state.name} 前全局守卫失败")
                     return
@@ -94,7 +95,8 @@ class MissionFSM:
                 await state.enter(self.interface)
 
             # ---- 每周期全局健康检查 ----
-            if not await self.interface.global_guard_check():
+            if not await self.interface.global_guard_check(
+                    allow_disarmed=state.allow_disarmed):
                 await self._handle_unhealthy(
                     f"{state.name} 执行中健康检查失败")
                 return

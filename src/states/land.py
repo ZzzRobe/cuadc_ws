@@ -11,6 +11,7 @@ class PrecisionLandState(BaseState):
 
     def __init__(self, timeout_s: float = 60):
         super().__init__("Land", timeout_s)
+        self.allow_disarmed = True  # RTL 着陆后 disarm 是正常终态
 
     async def enter(self, interface):
         await super().enter(interface)

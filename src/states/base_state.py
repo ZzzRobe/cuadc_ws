@@ -35,6 +35,7 @@ class BaseState(ABC):
         self._entered: bool = False
         self.is_completed = False
         self.error: Optional[str] = None
+        self.allow_disarmed: bool = False  # 允许 disarm 的状态（如 RTL 着陆后）
 
     async def enter(self, interface: "PX4Interface"):
         """进入状态时调用（仅一次）。"""
